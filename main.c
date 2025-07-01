@@ -1,84 +1,91 @@
-# include <stdio.h>
-# include <stdlib.h>
-# include <math.h>
-# include <time.h>
-# include <unistd.h>
-# include <fcntl.h>
-# include <termios.h>
-# include <sys/select.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <time.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <sys/select.h>
 
-# define HEIGHT 20
-# define WIDTH 60
+#define HEIGHT 20
+#define WIDTH 60
+
+# include <gtk/gtk.h>
+
+int main(int argc, char *argv[]) {
+    gtk_init(&argc, &argv);
+    GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(window), "贪吃蛇");
+    gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
+
+    g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    gtk_widget_show(window);
+
+    gtk_main();
+    return 0;
+}
 
 struct BODY{
     int x;
     int y;
 };
 struct SNAKE{
-    struct BODY body[HEIGHT*WIDTH];//body[0]就是蛇头
+    struct BODY body[HEIGHT*WIDTH];
     int size;
 }snake;
 
 struct FOOD{
-	int x;
-	int y;
+    int x;
+    int y;
 }food;
 
-int score = 0;//分数显示
+int score = 0;
 int lastx = 0, lasty = 0;
-int sleepSecond = 400;
+int sleepSecond = 200000;
 
 void initSnake(){
-	snake.size = 2;  //蛇大小是两节
-
+    snake.size = 2;
     snake.body[0].x = WIDTH/2;
-    snake.body[0].y = HEIGHT/2;   //初始化蛇头
-    snake.body[1].x = WIDTH/2 - 1;
-    snake.body[1].y = HEIGHT/2;   //初始化一节蛇身
+    snake.body[0].y = HEIGHT/2;
+    snake.body[1].x = snake.body[0].x - 1;
+    snake.body[1].y = snake.body[0].y/2;
 }
 
 void initFood(){
-    srand(time(NULL));//播种随机数种子
-
-    food.x = rand()%WIDTH;//0-59
-    food.y = rand()%HEIGHT; //0-19
+    srand(time(NULL));
+    do {
+        food.x = rand() % (WIDTH-2) + 1;  // 修正1：限制食物生成在有效区域
+        food.y = rand() % (HEIGHT-2) + 1;
+    } while (food.x == snake.body[0].x && food.y == snake.body[0].y); // 简单碰撞检测
 }
 
-//修改：使用ANSI转义序列定位光标,不能直接使用SetConsoleCursorPosition()函数
 void SetCursorPosition(int x, int y) {
     printf("\033[%d;%dH", y+1, x+1);
 }
-
 void initUI() {
-    for(int i = 0; i < snake.size; i++) {
-        SetCursorPosition(snake.body[i].x,snake.body[i].y);
-        if(i == 0){
-            putchar('@');
-        }
-        else{
-            putchar('#');
-        }
+    // 先清除旧蛇尾
+    SetCursorPosition(lastx, lasty);
+    putchar(' ');
 
-        //去除蛇尾，相当于在蛇尾画一个空格
-        SetCursorPosition(lastx,lasty);
-        putchar(' ');
-        //画食物
-        SetCursorPosition(food.x, food.y);
-        putchar('#');
+    // 再绘制新蛇身
+    for(int i = 0; i < snake.size; i++) {
+        SetCursorPosition(snake.body[i].x, snake.body[i].y);
+        if(i == 0) putchar('@');
+        else putchar('●');
     }
+
+    // 绘制食物
+    SetCursorPosition(food.x, food.y);
+    putchar('●');
 }
 
-//todo 优化蛇、食物和墙的形状
 void initWall(){
-    for(int i =0; i <= HEIGHT; i++){
-        for(int j =0; j <= WIDTH; j++){
-            if(j == WIDTH || j == 0){
-                printf("|");
+    for(int i = 0; i <= HEIGHT; i++){
+        for(int j = 0; j <= WIDTH; j++){
+            if(j == 0 || j == WIDTH || i == 0 || i == HEIGHT){
+                printf("●");
             }
-            else if(i == HEIGHT || i == 0){
-                printf("_");
-            }
-            else{
+            else {
                 printf(" ");
             }
         }
@@ -86,74 +93,89 @@ void initWall(){
     }
 }
 
+int kbhit(void) {
+    fd_set set;
+    struct timeval timeout = {0, 0};
+    FD_ZERO(&set);
+    FD_SET(STDIN_FILENO, &set);
+    return select(STDIN_FILENO + 1, &set, NULL, NULL, &timeout) == 1;
+}
+
+char getch(void) {
+    char c;
+    read(STDIN_FILENO, &c, 1);
+    return c;
+}
+
 void playGame() {
-    char ch = 'd';//初始移动方向是向右
-    //判断蛇撞墙
-    while (snake.body[0].x > 0 && snake.body[0].x < WIDTH
-           && snake.body[0].y > 0 && snake.body[0].y < HEIGHT)
-    {
-        initUI();//每次都要重新画蛇
-        usleep(sleepSecond * 1000);
+    char dir = 'd';
+    while (snake.body[0].x >= 1 && snake.body[0].x < WIDTH-1 &&
+           snake.body[0].y >= 1 && snake.body[0].y < HEIGHT-1) {
 
-        //todo 接收用户按键输入，阻塞问题及用户输入的判断尚未解决...
-        if (kbhit()) {
-            char ch = getchar();
-            switch (ch) {
-                case 'w':
-                    snake.body[0].y--;
-                    break;
-                case 's':
-                    snake.body[0].y++;
-                    break;
-                case 'a':
-                    snake.body[0].x--;
-                    break;
-                case 'd':
-                    snake.body[0].x++;
-                    break;
-                default:
-                    break;
-            }//蛇头移动方向
-        }
-        //存储蛇尾的坐标
-        lastx = snake.body[snake.size -1].x;
-        lasty = snake.body[snake.size -1].y;
+        lastx = snake.body[snake.size-1].x;
+        lasty = snake.body[snake.size-1].y;
 
-        for(int i =snake.size-1; i > 0; i--){
-            snake.body[i].x = snake.body[i-1].x;
-            snake.body[i].y = snake.body[i-1].y;
-        }//蛇身前一节给后一节赋值
-
-        //蛇头撞身体
-        for(int i = 1; i < snake.size; i++){
-            if(snake.body[0].x == snake.body[i].x && snake.body[0].y == snake.body[i].y)
-            {
-                return;
+        if(kbhit()) {
+            char new_dir = getch();
+            // 防止180度急转弯
+            if((new_dir == 'w' && dir != 's') ||
+               (new_dir == 's' && dir != 'w') ||
+               (new_dir == 'a' && dir != 'd') ||
+               (new_dir == 'd' && dir != 'a')) {
+                dir = new_dir;
             }
         }
-        //蛇头撞食物
-        if(snake.body[0].x == food.x && snake.body[0].y == food.y)
-        {
-            snake.size++;  //身体增长
-            initFood();    //食物消失，初始化新的食物
-            score += 10;    //加分
-            if (sleepSecond > 50) {
-                sleepSecond -= 5;
-            }//吃到食物之后加速，且设置最低临界速度
+
+        // 更新蛇头位置
+        switch(dir) {
+            case 'w':
+                snake.body[0].y--;
+                break;
+            case 's':
+                snake.body[0].y++;
+                break;
+            case 'a':
+                snake.body[0].x--;
+                break;
+            case 'd':
+                snake.body[0].x++;
+                break;
         }
+
+        // 更新蛇身位置
+        for(int i = snake.size-1; i > 0; i--) {
+            snake.body[i].x = snake.body[i-1].x;
+            snake.body[i].y = snake.body[i-1].y;
+        }
+        // 自撞检测
+        for(int i = 1; i < snake.size; i++){
+            if(snake.body[0].x == snake.body[i].x &&
+               snake.body[0].y == snake.body[i].y)
+                return;
+        }
+
+        // 吃食物检测
+        if(snake.body[0].x == food.x && snake.body[0].y == food.y){
+            snake.size++;
+            initFood();
+            score += 10;
+            if(sleepSecond > 50000) sleepSecond -= 10000;
+        }
+
+        printf("\033[2J");
+        initWall();
+        initUI();
+        usleep(sleepSecond);
     }
 }
 
-//todo 将成绩存入文件，输出排行榜
 void showScore() {
-    //将光标默认位置移动至不干扰游戏位置
-    SetCursorPosition(0,HEIGHT + 2);
-    printf("Game Over!!!\n");
-    printf("成绩为: %d\n\n\n",score);
+    SetCursorPosition(0, HEIGHT+2);
+    printf("Game Over!!!\n成绩为: %d\n\n", score);
 }
 
 int main() {
-    srand((time(NULL)));
+    srand(time(NULL));
 
     initSnake();
     initFood();
@@ -163,9 +185,5 @@ int main() {
 
     playGame();
     showScore();
-    //todo 设置多个关卡，让用户选择是否进行下一关
-    system("pause");
-    return EXIT_SUCCESS;
+    return 0;
 }
-
-
